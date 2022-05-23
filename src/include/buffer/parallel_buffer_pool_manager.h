@@ -12,7 +12,10 @@
 
 #pragma once
 
+#include <memory>
+
 #include "buffer/buffer_pool_manager.h"
+#include "buffer/buffer_pool_manager_instance.h"
 #include "recovery/log_manager.h"
 #include "storage/disk/disk_manager.h"
 #include "storage/page/page.h"
@@ -86,5 +89,28 @@ class ParallelBufferPoolManager : public BufferPoolManager {
    * Flushes all the pages in the buffer pool to disk.
    */
   void FlushAllPgsImp() override;
+
+ private:
+  /** Number of pages in the buffer pool. */
+  const size_t pool_size_;
+  /** How many instances are in the parallel BPM (if present, otherwise just 1 BPI) */
+  const uint32_t num_instances_ = 1;
+//  std::mutex latch_;
+
+  // 从哪个index开始创建page
+  int start_index_;
+  // keep all BufferPoolManager
+  /*
+     由于allocator将内存空间的分配和对象的构建分离
+     故使用allocator分为以下几步:
+     1.allocator与类绑定，因为allocator是一个泛型类
+     2.allocate()申请指定大小空间
+     3.construct()构建对象，其参数为可变参数，所以可以选择匹配的构造函数
+     4.使用，与其它指针使用无异
+     5.destroy()析构对象，此时空间还是可以使用
+     6.deallocate()回收空间
+ */
+  std::allocator<BufferPoolManagerInstance> alloc_;
+  BufferPoolManagerInstance *buffer_pool_manager_array_;
 };
 }  // namespace bustub

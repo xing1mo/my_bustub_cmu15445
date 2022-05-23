@@ -127,21 +127,25 @@ class BufferPoolManagerInstance : public BufferPoolManager {
   const uint32_t num_instances_ = 1;
   /** Index of this BPI in the parallel BPM (if present, otherwise just 0) */
   const uint32_t instance_index_ = 0;
-  /** Each BPI maintains its own counter for page_ids to hand out, must ensure they mod back to its instance_index_ */
-  std::atomic<page_id_t> next_page_id_ = instance_index_;
+  /** Each BPI maintains its own counter for page_ids to hand out, must ensure they mod back to its instance_index_
+   * std::atomic是Ｃ++的原子操作，属于并发中的线程安全类型，可以理解成数据自带mutex锁，不同线程访问同一个数据时不出错，各线程不冲突。*/
+  std::atomic<page_id_t> next_page_id_ = static_cast<page_id_t>(instance_index_);
 
   /** Array of buffer pool pages. */
   Page *pages_;
-  /** Pointer to the disk manager. */
-  DiskManager *disk_manager_ __attribute__((__unused__));
-  /** Pointer to the log manager. */
-  LogManager *log_manager_ __attribute__((__unused__));
   /** Page table for keeping track of buffer pool pages. */
   std::unordered_map<page_id_t, frame_id_t> page_table_;
+  std::unordered_map<frame_id_t, page_id_t> frame_to_page_;
   /** Replacer to find unpinned pages for replacement. */
   Replacer *replacer_;
   /** List of free pages. */
   std::list<frame_id_t> free_list_;
+
+  /** Pointer to the disk manager.
+   * __attribute__((__unused__))表示该函数或变量可能不使用，这个属性可以避免编译器产生警告信息*/
+  DiskManager *disk_manager_ __attribute__((__unused__));
+  /** Pointer to the log manager. */
+  LogManager *log_manager_ __attribute__((__unused__));
   /** This latch protects shared data structures. We recommend updating this comment to describe what it protects. */
   std::mutex latch_;
 };
