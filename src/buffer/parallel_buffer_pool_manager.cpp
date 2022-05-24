@@ -30,7 +30,7 @@ ParallelBufferPoolManager::~ParallelBufferPoolManager() {
   for (uint32_t i = 0; i < num_instances_; ++i) {
     alloc_.destroy(buffer_pool_manager_array_ + i);
   }
-  alloc_.deallocate(buffer_pool_manager_array_, 5);
+  alloc_.deallocate(buffer_pool_manager_array_, num_instances_);
 }
 
 size_t ParallelBufferPoolManager::GetPoolSize() {
@@ -45,17 +45,18 @@ BufferPoolManager *ParallelBufferPoolManager::GetBufferPoolManager(page_id_t pag
 
 Page *ParallelBufferPoolManager::FetchPgImp(page_id_t page_id) {
   // Fetch page for page_id from responsible BufferPoolManagerInstance
-  return GetBufferPoolManager(page_id)->FetchPage(page_id);
+  return dynamic_cast<BufferPoolManagerInstance *>(GetBufferPoolManager(page_id))->FetchPgImp(page_id);
 }
 
 bool ParallelBufferPoolManager::UnpinPgImp(page_id_t page_id, bool is_dirty) {
   // Unpin page_id from responsible BufferPoolManagerInstance
-  return GetBufferPoolManager(page_id)->UnpinPage(page_id, is_dirty);
+  return dynamic_cast<BufferPoolManagerInstance *>(GetBufferPoolManager(page_id))->UnpinPgImp(page_id, is_dirty);
 }
 
 bool ParallelBufferPoolManager::FlushPgImp(page_id_t page_id) {
   // Flush page_id from responsible BufferPoolManagerInstance
-  return GetBufferPoolManager(page_id)->FlushPage(page_id);
+  return dynamic_cast<BufferPoolManagerInstance *>(GetBufferPoolManager(page_id))->FlushPgImp(page_id);
+
 }
 
 Page *ParallelBufferPoolManager::NewPgImp(page_id_t *page_id) {
@@ -68,7 +69,7 @@ Page *ParallelBufferPoolManager::NewPgImp(page_id_t *page_id) {
 //  std::lock_guard<std::mutex> lck(latch_);
   Page *result = nullptr;
   for (uint32_t i = 0; i < num_instances_; ++i) {
-    result = (buffer_pool_manager_array_ + ((i + start_index_) % num_instances_))->NewPage(page_id);
+    result = dynamic_cast<BufferPoolManagerInstance *>(buffer_pool_manager_array_ + ((i + start_index_) % num_instances_))->NewPgImp(page_id);
     if (result != nullptr) {
       break ;
     }
@@ -80,13 +81,13 @@ Page *ParallelBufferPoolManager::NewPgImp(page_id_t *page_id) {
 
 bool ParallelBufferPoolManager::DeletePgImp(page_id_t page_id) {
   // Delete page_id from responsible BufferPoolManagerInstance
-  return GetBufferPoolManager(page_id)->DeletePage(page_id);
+  return dynamic_cast<BufferPoolManagerInstance *>(GetBufferPoolManager(page_id))->DeletePgImp(page_id);
 }
 
 void ParallelBufferPoolManager::FlushAllPgsImp() {
   // flush all pages from all BufferPoolManagerInstances
   for (uint32_t i = 0; i < num_instances_; ++i) {
-    (buffer_pool_manager_array_ + i)->FlushAllPages();
+    dynamic_cast<BufferPoolManagerInstance *>(buffer_pool_manager_array_ + i)->FlushAllPgsImp();
   }
 }
 

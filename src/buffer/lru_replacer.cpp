@@ -17,10 +17,12 @@ namespace bustub {
 LRUReplacer::LRUReplacer(size_t num_pages) {}
 
 LRUReplacer::~LRUReplacer() {
-  mu_.lock();
-  replace_list_.clear();
-  hash_replace_map_.clear();
-  mu_.unlock();
+//  mu_.lock();
+//  replace_list_.clear();
+//  hash_replace_map_.clear();
+  std::destroy(replace_list_.begin(), replace_list_.end());
+  std::destroy(hash_replace_map_.begin(), hash_replace_map_.end());
+//  mu_.unlock();
 }
 
 bool LRUReplacer::Victim(frame_id_t *frame_id) {

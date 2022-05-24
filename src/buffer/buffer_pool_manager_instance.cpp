@@ -45,8 +45,9 @@ BufferPoolManagerInstance::BufferPoolManagerInstance(size_t pool_size, uint32_t 
 BufferPoolManagerInstance::~BufferPoolManagerInstance() {
   delete[] pages_;
   delete replacer_;
-  page_table_.clear();
-  frame_to_page_.clear();
+  std::destroy(page_table_.begin(), page_table_.end());
+  std::destroy(frame_to_page_.begin(), frame_to_page_.end());
+  std::destroy(free_list_.begin(), free_list_.end());
 }
 
 bool BufferPoolManagerInstance::FlushPgImp(page_id_t page_id) {
