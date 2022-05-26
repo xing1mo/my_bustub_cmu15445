@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "common/config.h"
+#include "container/hash/hash_function.h"
 #include "storage/index/int_comparator.h"
 #include "storage/page/hash_table_page_defs.h"
 
@@ -39,7 +40,10 @@ class HashTableBucketPage {
  public:
   // Delete all constructor / destructor to ensure memory safety
   HashTableBucketPage() = delete;
-
+  // reset memory
+  void Reset();
+  // judge duplicate key-value
+  bool IsDuplicate(KeyType key, ValueType value, KeyComparator cmp);
   /**
    * Scan the bucket and collect values that have the matching key
    *
@@ -139,9 +143,14 @@ class HashTableBucketPage {
 
  private:
   //  For more on BUCKET_ARRAY_SIZE see storage/page/hash_table_page_defs.h
+  // 意思是这个位置是否被占领过，这个是为了方便判定是否需要继续遍历bucket的。在插入时，我们遍历array，只需关注当前位置是否readable即可；在删除时，若发现一个位置是非occupied的，可以直接停止遍历。
   char occupied_[(BUCKET_ARRAY_SIZE - 1) / 8 + 1];
   // 0 if tombstone/brand new (never occupied), 1 otherwise.
+  // 意思是当前某个位置是否有数据可读，注意这里需要用位运算来确定，一个char有8位，所以readable_的长度是array_的1/8。比如如果要查询array的第10个元素是否有数据，则需要查看readable数组第10/8=1个元素的第10%8=2位元素。即(readable_[1]
+  // >> 2) & 0x01的值。
   char readable_[(BUCKET_ARRAY_SIZE - 1) / 8 + 1];
+  // 负责存储数据，这个数组在定义时声明为0，其实是一个小trick，目的是方便内存缓冲区的管理。每个HashTableBucketPage会分配4k内存，但是因为MappingType(是一个
+  // std::pair)大小不同(可能是8/16/32/64字节不等)，array_大小不好预分配，若申明为0则可灵活分配。
   MappingType array_[0];
 };
 

@@ -75,7 +75,8 @@ class HashTableDirectoryPage {
 
   /**
    * Gets the split image of an index
-   *
+   *获取兄弟bucket的bucket_idx(也就是所谓的splitImage), 也就是说,
+   *我们要将传入的bucket_idx的local_depth的最高位取反后返回
    * @param bucket_idx the directory index for which to find the split image
    * @return the directory index of the split image
    **/

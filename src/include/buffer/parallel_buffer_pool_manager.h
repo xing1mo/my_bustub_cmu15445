@@ -95,7 +95,7 @@ class ParallelBufferPoolManager : public BufferPoolManager {
   const size_t pool_size_;
   /** How many instances are in the parallel BPM (if present, otherwise just 1 BPI) */
   const uint32_t num_instances_ = 1;
-//  std::mutex latch_;
+  //  std::mutex latch_;
 
   // 从哪个index开始创建page
   int start_index_;

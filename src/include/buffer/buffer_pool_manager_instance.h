@@ -29,6 +29,7 @@ namespace bustub {
  */
 class BufferPoolManagerInstance : public BufferPoolManager {
   friend class ParallelBufferPoolManager;
+
  public:
   /**
    * Creates a new BufferPoolManagerInstance.

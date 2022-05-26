@@ -161,6 +161,8 @@ class ExtendibleHashTable {
    */
   void Merge(Transaction *transaction, const KeyType &key, const ValueType &value);
 
+  void MyMerge(Transaction *transaction, int bucket_index, uint32_t global_depth);
+  //  HashTableDirectoryPage* directory_page_;
   // member variables
   page_id_t directory_page_id_;
   BufferPoolManager *buffer_pool_manager_;

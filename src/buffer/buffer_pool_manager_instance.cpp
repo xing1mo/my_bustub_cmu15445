@@ -109,7 +109,6 @@ Page *BufferPoolManagerInstance::NewPgImp(page_id_t *page_id) {
   page_table_[*page_id] = frame_id;
   frame_to_page_[frame_id] = *page_id;
   pages_[frame_id].ResetMemory();
-  // ????privata data ,why?
   pages_[frame_id].page_id_ = *page_id;
   pages_[frame_id].pin_count_ = 1;
   pages_[frame_id].is_dirty_ = false;

@@ -56,7 +56,6 @@ bool ParallelBufferPoolManager::UnpinPgImp(page_id_t page_id, bool is_dirty) {
 bool ParallelBufferPoolManager::FlushPgImp(page_id_t page_id) {
   // Flush page_id from responsible BufferPoolManagerInstance
   return dynamic_cast<BufferPoolManagerInstance *>(GetBufferPoolManager(page_id))->FlushPgImp(page_id);
-
 }
 
 Page *ParallelBufferPoolManager::NewPgImp(page_id_t *page_id) {
@@ -66,16 +65,18 @@ Page *ParallelBufferPoolManager::NewPgImp(page_id_t *page_id) {
   // starting index and return nullptr
   // 2.   Bump the starting index (mod number of instances) to start search at a different BPMI each time this function
   // is called
-//  std::lock_guard<std::mutex> lck(latch_);
+  //  std::lock_guard<std::mutex> lck(latch_);
   Page *result = nullptr;
   for (uint32_t i = 0; i < num_instances_; ++i) {
-    result = dynamic_cast<BufferPoolManagerInstance *>(buffer_pool_manager_array_ + ((i + start_index_) % num_instances_))->NewPgImp(page_id);
+    result =
+        dynamic_cast<BufferPoolManagerInstance *>(buffer_pool_manager_array_ + ((i + start_index_) % num_instances_))
+            ->NewPgImp(page_id);
     if (result != nullptr) {
-      break ;
+      break;
     }
   }
-  //无论是否成功都应该修改
-  start_index_ = (start_index_+1)%static_cast<int>(num_instances_);
+  // 无论是否成功都应该修改
+  start_index_ = (start_index_ + 1) % static_cast<int>(num_instances_);
   return result;
 }
 
