@@ -38,10 +38,10 @@ void HashTableDirectoryPage::IncrGlobalDepth() {
 
 void HashTableDirectoryPage::DecrGlobalDepth() {
   global_depth_--;
-  for (uint32_t i = 0; i < Size(); ++i) {
-    assert(local_depths_[i + Size()] == local_depths_[i]);
-    assert(bucket_page_ids_[i + Size()] == bucket_page_ids_[i]);
-  }
+  //  for (uint32_t i = 0; i < Size(); ++i) {
+  //    assert(local_depths_[i + Size()] == local_depths_[i]);
+  //    assert(bucket_page_ids_[i + Size()] == bucket_page_ids_[i]);
+  //  }
 }
 
 page_id_t HashTableDirectoryPage::GetBucketPageId(uint32_t bucket_idx) { return bucket_page_ids_[bucket_idx]; }

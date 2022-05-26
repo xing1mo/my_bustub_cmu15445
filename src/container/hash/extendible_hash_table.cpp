@@ -281,7 +281,7 @@ void HASH_TABLE_TYPE::MyMerge(Transaction *transaction, int bucket_index1, uint3
 
   uint32_t bucket_index2 = dir_page->GetSplitImageIndex(bucket_index1);
   page_id_t bucket_id2 = dir_page->GetBucketPageId(bucket_index2);
-  assert(bucket_index2 < dir_page->Size());
+  //  assert(bucket_index2 < dir_page->Size());
   if (bucket_page1->IsEmpty() && dir_page->GetLocalDepth(bucket_index1) == dir_page->GetLocalDepth(bucket_index2) &&
       bucket_id2 != bucket_id1) {
     // 进行bucket合并
@@ -294,8 +294,8 @@ void HASH_TABLE_TYPE::MyMerge(Transaction *transaction, int bucket_index1, uint3
     uint32_t local_index = bucket_index1 & ((1 << local_d) - 1);
     local_depth = 1 << local_d;
     for (uint32_t i = local_index; i < dir_page->Size(); i += local_depth) {
-      assert(dir_page->GetLocalDepth(i) == local_d + 1 &&
-             (dir_page->GetBucketPageId(i) == bucket_id1 || dir_page->GetBucketPageId(i) == bucket_id2));
+      //      assert(dir_page->GetLocalDepth(i) == local_d + 1 &&
+      //             (dir_page->GetBucketPageId(i) == bucket_id1 || dir_page->GetBucketPageId(i) == bucket_id2));
       dir_page->SetBucketPageId(i, bucket_id2);
       dir_page->DecrLocalDepth(i);
     }
