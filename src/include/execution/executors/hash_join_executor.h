@@ -13,15 +13,41 @@
 #pragma once
 
 #include <memory>
+#include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "execution/executor_context.h"
 #include "execution/executors/abstract_executor.h"
+#include "execution/expressions/abstract_expression.h"
 #include "execution/plans/hash_join_plan.h"
+#include "include/common/util/hash_util.h"
 #include "storage/table/tuple.h"
 
 namespace bustub {
+// 作为map的key需要重写==
+struct JoinKey {
+  Value value_;
+  bool operator==(const JoinKey &other) const { return value_.CompareEquals(other.value_) == CmpBool::CmpTrue; }
+};
+struct JoinValue {
+  std::vector<Tuple> tuples_;
+};
+}  // namespace bustub
+namespace std {
+template <>
+struct hash<bustub::JoinKey> {
+  std::size_t operator()(const bustub::JoinKey &join_key) const {
+    size_t curr_hash = 0;
+    if (!join_key.value_.IsNull()) {
+      curr_hash = bustub::HashUtil::CombineHashes(curr_hash, bustub::HashUtil::HashValue(&join_key.value_));
+    }
+    return curr_hash;
+  }
+};
+}  // namespace std
 
+namespace bustub {
 /**
  * HashJoinExecutor executes a nested-loop JOIN on two tables.
  */
@@ -36,7 +62,6 @@ class HashJoinExecutor : public AbstractExecutor {
    */
   HashJoinExecutor(ExecutorContext *exec_ctx, const HashJoinPlanNode *plan,
                    std::unique_ptr<AbstractExecutor> &&left_child, std::unique_ptr<AbstractExecutor> &&right_child);
-
   /** Initialize the join */
   void Init() override;
 
@@ -54,6 +79,17 @@ class HashJoinExecutor : public AbstractExecutor {
  private:
   /** The NestedLoopJoin plan node to be executed. */
   const HashJoinPlanNode *plan_;
+
+  std::unique_ptr<AbstractExecutor> left_executor_, right_executor_;
+
+  std::unordered_map<JoinKey, JoinValue> key_to_tuple_table_;
+
+  // 每个key对应多个tuple,标记join到哪里了
+  std::vector<Tuple>::iterator iter_;
+  bool is_end_;
+  Tuple right_tuple_;
+  JoinKey right_key_;
+  RID right_rid_;
 };
 
 }  // namespace bustub

@@ -23,6 +23,7 @@ namespace bustub {
 
 /**
  * The SeqScanExecutor executor executes a sequential table scan.
+ * Select plan_->OutputSchema() From Table Where ...
  */
 class SeqScanExecutor : public AbstractExecutor {
  public:
@@ -50,5 +51,8 @@ class SeqScanExecutor : public AbstractExecutor {
  private:
   /** The sequential scan plan node to be executed */
   const SeqScanPlanNode *plan_;
+
+  TableInfo *table_info_;
+  TableIterator iter_ = TableIterator(nullptr, bustub::RID(), nullptr);
 };
 }  // namespace bustub

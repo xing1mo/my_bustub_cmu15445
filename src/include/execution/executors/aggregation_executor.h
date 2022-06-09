@@ -34,6 +34,7 @@ namespace bustub {
 class SimpleAggregationHashTable {
  public:
   /**
+   * 相当于将一组group中的值映射到所有聚合值
    * Construct a new SimpleAggregationHashTable instance.
    * @param agg_exprs the aggregation expressions
    * @param agg_types the types of aggregations
@@ -212,5 +213,8 @@ class AggregationExecutor : public AbstractExecutor {
   // TODO(Student): Uncomment SimpleAggregationHashTable aht_;
   /** Simple aggregation hash table iterator */
   // TODO(Student): Uncomment SimpleAggregationHashTable::Iterator aht_iterator_;
+
+  SimpleAggregationHashTable aggregation_hash_table_;
+  SimpleAggregationHashTable::Iterator iter_;
 };
 }  // namespace bustub

@@ -13,13 +13,47 @@
 #pragma once
 
 #include <memory>
+#include <unordered_map>
 #include <utility>
+#include <vector>
 
+#include "common/util/hash_util.h"
 #include "execution/executors/abstract_executor.h"
 #include "execution/plans/distinct_plan.h"
+#include "include/execution/expressions/abstract_expression.h"
 
 namespace bustub {
+struct DistinctKey {
+  std::vector<Value> tuples_;
+  bool operator==(const DistinctKey &other) const {
+    for (uint32_t i = 0; i < other.tuples_.size(); i++) {
+      if (tuples_[i].CompareEquals(other.tuples_[i]) != CmpBool::CmpTrue) {
+        return false;
+      }
+    }
+    return true;
+  }
+};
+}  // namespace bustub
 
+// hash DistinctKey
+namespace std {
+template <>
+struct hash<bustub::DistinctKey> {
+  std::size_t operator()(const bustub::DistinctKey &agg_key) const {
+    size_t curr_hash = 0;
+    for (const auto &key : agg_key.tuples_) {
+      if (!key.IsNull()) {
+        curr_hash = bustub::HashUtil::CombineHashes(curr_hash, bustub::HashUtil::HashValue(&key));
+      }
+    }
+    return curr_hash;
+  }
+};
+
+}  // namespace std
+
+namespace bustub {
 /**
  * DistinctExecutor removes duplicate rows from child ouput.
  */
@@ -53,5 +87,10 @@ class DistinctExecutor : public AbstractExecutor {
   const DistinctPlanNode *plan_;
   /** The child executor from which tuples are obtained */
   std::unique_ptr<AbstractExecutor> child_executor_;
+
+  std::unordered_map<DistinctKey, RID> distinct_hash_table_;
+
+  // 每个key对应多个tuple,标记join到哪里了
+  std::unordered_map<DistinctKey, RID>::iterator iter_;
 };
 }  // namespace bustub
