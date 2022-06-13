@@ -38,19 +38,27 @@ class LockManager {
   class LockRequest {
    public:
     LockRequest(txn_id_t txn_id, LockMode lock_mode) : txn_id_(txn_id), lock_mode_(lock_mode), granted_(false) {}
+    LockRequest(txn_id_t txn_id, LockMode lock_mode,bool granted) : txn_id_(txn_id), lock_mode_(lock_mode), granted_(granted) {}
 
     txn_id_t txn_id_;
     LockMode lock_mode_;
+    // 一开始实现时granted没用到（一个txn应该是串行的)
+    // 但是当要进行死锁预防时，需要看到哪些txn在等待分配锁，又重新加上了
     bool granted_;
   };
 
   class LockRequestQueue {
    public:
+    //采用加锁的在前，未加锁的在后，进行优化
     std::list<LockRequest> request_queue_;
     // for notifying blocked transactions on this rid
     std::condition_variable cv_;
     // txn_id of an upgrading transaction (if any)
     txn_id_t upgrading_ = INVALID_TXN_ID;
+    // 对每个tuple的queue上锁
+    std::mutex query_latch_;
+    // 加锁互斥量
+    std::mutex mutex_;
   };
 
  public:
