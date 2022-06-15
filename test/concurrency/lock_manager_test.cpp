@@ -418,8 +418,6 @@ void UpgradeTest1() {
   txn_mgr.Commit(&txn0);
   CheckCommitted(&txn0);
 }
-TEST(LockManagerTest, UpgradeTest1) {UpgradeTest1();}
+TEST(LockManagerTest, UpgradeTest1) { UpgradeTest1(); }
 
 }  // namespace bustub
-
-

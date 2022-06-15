@@ -29,14 +29,15 @@ bool UpdateExecutor::Next([[maybe_unused]] Tuple *tuple, RID *rid) {
   RID lock_rid;
   Tuple old_tuple;
   if (child_executor_->Next(&old_tuple, rid)) {
-    // REPEATABLE_READ隔离级别之前的读锁没放，升级为写锁
-    if (exec_ctx_->GetTransaction()->GetIsolationLevel() == IsolationLevel::REPEATABLE_READ &&
+    // 之前为读锁，升级为写锁
+    if (exec_ctx_->GetLockManager()->KindLock(exec_ctx_->GetTransaction(), *rid) == 1 &&
         exec_ctx_->GetLockManager()->LockUpgrade(exec_ctx_->GetTransaction(), *rid)) {
       lock_rid = *rid;
     }
 
-    // 所有其他隔离级别直接加写锁
-    if (exec_ctx_->GetLockManager()->LockExclusive(exec_ctx_->GetTransaction(), *rid)) {
+    // 之前没加锁，此时加写锁
+    if (exec_ctx_->GetLockManager()->KindLock(exec_ctx_->GetTransaction(), *rid) == 0 &&
+        exec_ctx_->GetLockManager()->LockExclusive(exec_ctx_->GetTransaction(), *rid)) {
       lock_rid = *rid;
     }
 
@@ -58,17 +59,8 @@ bool UpdateExecutor::Next([[maybe_unused]] Tuple *tuple, RID *rid) {
         exec_ctx_->GetTransaction()->GetIndexWriteSet()->emplace_back(*rid, plan_->TableOid(), WType::INSERT, new_tuple,
                                                                       index_info->index_oid_, exec_ctx_->GetCatalog());
       }
-
-      // READ_COMMITTED隔离级别时需要立即解锁
-      //      if (exec_ctx_->GetTransaction()->GetIsolationLevel() == IsolationLevel::READ_COMMITTED) {
-      //        exec_ctx_->GetLockManager()->Unlock(exec_ctx_->GetTransaction(), lock_rid);
-      //      }
       return true;
     }
-    // READ_COMMITTED隔离级别时需要立即解锁
-    //    if (exec_ctx_->GetTransaction()->GetIsolationLevel() == IsolationLevel::READ_COMMITTED) {
-    //      exec_ctx_->GetLockManager()->Unlock(exec_ctx_->GetTransaction(), lock_rid);
-    //    }
   }
   return false;
 }

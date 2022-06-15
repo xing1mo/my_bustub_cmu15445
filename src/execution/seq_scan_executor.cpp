@@ -73,19 +73,6 @@ bool SeqScanExecutor::Next(Tuple *tuple, RID *rid) {
   //    exec_ctx_->GetTransactionManager()->Abort(exec_ctx_->GetTransaction());
   //    return false;
   //  }
-
-  // REPEATABLE_READ隔离级别时需要一同解锁
-  //  if (exec_ctx_->GetTransaction()->GetIsolationLevel() == IsolationLevel::REPEATABLE_READ){
-  //    while (!rid_lock_queue_.empty()){
-  //      if (exec_ctx_->GetLockManager()->Unlock(exec_ctx_->GetTransaction(),rid_lock_queue_.front())){
-  //        rid_lock_queue_.pop();
-  //      }
-  //      if (exec_ctx_->GetTransaction()->GetState() == TransactionState::ABORTED){
-  //        exec_ctx_->GetTransactionManager()->Abort(exec_ctx_->GetTransaction());
-  //        return false;
-  //      }
-  //    }
-  //  }
   iter_++;  // iter_指向下一个Tuple
 
   return true;

@@ -35,7 +35,7 @@ bool InsertExecutor::Next([[maybe_unused]] Tuple *tuple, RID *rid) {
   Tuple insert_tuple;
   if (!plan_->IsRawInsert()) {
     if (child_executor_->Next(&insert_tuple, rid)) {
-      // 可能错误点：插入失败后续也要继续插入
+      // 错误点：插入失败后续也要继续插入
       if (table_info_->table_->InsertTuple(insert_tuple, rid, exec_ctx_->GetTransaction())) {
         // 所有隔离级别都需要写锁，因后续修改index，此时加写锁
         if (exec_ctx_->GetLockManager()->LockExclusive(exec_ctx_->GetTransaction(), *rid)) {

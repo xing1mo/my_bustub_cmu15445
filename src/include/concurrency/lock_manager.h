@@ -117,6 +117,19 @@ class LockManager {
    */
   bool Unlock(Transaction *txn, const RID &rid);
 
+  // 检查之前是否上过锁，0没上，1读锁，2写锁
+  int KindLock(Transaction *txn, const RID &rid) {
+    for (auto item : lock_table_[rid].request_queue_) {
+      if (txn->GetTransactionId() == item.txn_id_) {
+        if (item.lock_mode_ == LockMode::SHARED) {
+          return 1;
+        }
+        return 2;
+      }
+    }
+    return 0;
+  }
+
  private:
   std::mutex latch_;
 
@@ -193,7 +206,7 @@ class LockManager {
         *my_request = item;
         break;
       }
-      if (item->lock_mode_ == LockMode::EXCLUSIVE || !item->granted_) {
+      if (item->lock_mode_ == LockMode::EXCLUSIVE) {
         return false;
       }
     }

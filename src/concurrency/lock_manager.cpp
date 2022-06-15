@@ -82,7 +82,7 @@ bool LockManager::LockShared(Transaction *txn, const RID &rid) {
   txn->GetSharedLockSet()->emplace(rid);
 
   latch_.unlock();
-  // LOG_INFO("txn:[%d] ,rid:[%d]-GetRLock", txn->GetTransactionId(), rid.GetPageId());
+  // LOG_INFO("txn:[%d] ,rid:[%d-%d]-GetRLock", txn->GetTransactionId(), rid.GetPageId(),rid.GetSlotNum());
   return true;
 }
 
@@ -114,7 +114,8 @@ bool LockManager::LockExclusive(Transaction *txn, const RID &rid) {
     // 检查是否被Abort导致唤醒
     if (CheckAbortedL(txn, rid)) {
       latch_.unlock();
-      return false;
+      //  return false;
+      throw TransactionAbortException(txn->GetTransactionId(), AbortReason::DEADLOCK);
     }
   }
 
@@ -209,8 +210,13 @@ bool LockManager::LockUpgrade(Transaction *txn, const RID &rid) {
     latch_.lock();
     // 检查是否被Abort导致唤醒
     if (CheckAbortedL(txn, rid)) {
+      if (lock_table_[rid].upgrading_ == txn->GetTransactionId()) {
+        lock_table_[rid].upgrading_ = INVALID_TXN_ID;
+      }
+      txn->GetSharedLockSet()->erase(rid);
       latch_.unlock();
-      return false;
+      //  return false;
+      throw TransactionAbortException(txn->GetTransactionId(), AbortReason::DEADLOCK);
     }
   }
 
