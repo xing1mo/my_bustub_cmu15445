@@ -10,6 +10,12 @@
 #include "concurrency/transaction_manager.h"
 #include "gtest/gtest.h"
 
+#include <atomic>
+#include <future>  //NOLINT
+#include <thread>  //NOLINT
+
+#include "common/logger.h"
+#include "concurrency/transaction.h"
 namespace bustub {
 
 /*
@@ -30,6 +36,15 @@ void CheckTxnLockSize(Transaction *txn, size_t shared_size, size_t exclusive_siz
   EXPECT_EQ(txn->GetSharedLockSet()->size(), shared_size);
   EXPECT_EQ(txn->GetExclusiveLockSet()->size(), exclusive_size);
 }
+#define TEST_TIMEOUT_BEGIN                           \
+  std::promise<bool> promisedFinished;               \
+  auto futureResult = promisedFinished.get_future(); \
+                              std::thread([](std::promise<bool>& finished) {
+#define TEST_TIMEOUT_FAIL_END(X)                                                                  \
+  finished.set_value(true);                                                                       \
+  }, std::ref(promisedFinished)).detach();                                                        \
+  EXPECT_TRUE(futureResult.wait_for(std::chrono::milliseconds(X)) != std::future_status::timeout) \
+      << "Test Failed Due to Time Out";
 
 // Basic shared lock test under REPEATABLE_READ
 void BasicTest1() {
@@ -204,4 +219,207 @@ void WoundWaitBasicTest() {
 }
 TEST(LockManagerTest, WoundWaitBasicTest) { WoundWaitBasicTest(); }
 
+// --- Real tests ---
+// Basic shared lock test under REPEATABLE_READ
+void BasicTest4() {
+  LockManager lock_mgr{};
+  TransactionManager txn_mgr{&lock_mgr};
+
+  std::vector<RID> rids;
+  std::vector<Transaction *> txns;
+  int num_rids = 100;
+  for (int i = 0; i < num_rids; i++) {
+    RID rid{i, static_cast<uint32_t>(i)};
+    rids.push_back(rid);
+    txns.push_back(txn_mgr.Begin());
+    EXPECT_EQ(i, txns[i]->GetTransactionId());
+  }
+  // test
+
+  auto task = [&](int txn_id) {
+    bool res;
+    for (const RID &rid : rids) {
+      res = lock_mgr.LockShared(txns[txn_id], rid);
+      EXPECT_TRUE(res);
+      CheckGrowing(txns[txn_id]);
+    }
+    for (const RID &rid : rids) {
+      res = lock_mgr.Unlock(txns[txn_id], rid);
+      EXPECT_TRUE(res);
+      CheckShrinking(txns[txn_id]);
+    }
+    txn_mgr.Commit(txns[txn_id]);
+    CheckCommitted(txns[txn_id]);
+  };
+  std::vector<std::thread> threads;
+  threads.reserve(num_rids);
+
+  for (int i = 0; i < num_rids; i++) {
+    threads.emplace_back(std::thread{task, i});
+  }
+
+  for (int i = 0; i < num_rids; i++) {
+    threads[i].join();
+  }
+
+  for (int i = 0; i < num_rids; i++) {
+    delete txns[i];
+  }
+}
+
+// Basic shared lock test under READ_COMMITTED
+void BasicTest2() {
+  LockManager lock_mgr{};
+  TransactionManager txn_mgr{&lock_mgr};
+
+  std::vector<RID> rids;
+  std::vector<Transaction *> txns;
+  int num_rids = 100;
+  for (int i = 0; i < num_rids; i++) {
+    RID rid{i, static_cast<uint32_t>(i)};
+    rids.push_back(rid);
+    txns.push_back(txn_mgr.Begin(nullptr, IsolationLevel::READ_COMMITTED));
+    EXPECT_EQ(i, txns[i]->GetTransactionId());
+  }
+  // test
+
+  auto task = [&](int txn_id) {
+    bool res;
+    for (const RID &rid : rids) {
+      res = lock_mgr.LockShared(txns[txn_id], rid);
+      EXPECT_TRUE(res);
+      CheckGrowing(txns[txn_id]);
+    }
+    for (const RID &rid : rids) {
+      res = lock_mgr.Unlock(txns[txn_id], rid);
+      EXPECT_TRUE(res);
+      CheckGrowing(txns[txn_id]);
+    }
+    txn_mgr.Commit(txns[txn_id]);
+    CheckCommitted(txns[txn_id]);
+  };
+  std::vector<std::thread> threads;
+  threads.reserve(num_rids);
+
+  for (int i = 0; i < num_rids; i++) {
+    threads.emplace_back(std::thread{task, i});
+  }
+
+  for (int i = 0; i < num_rids; i++) {
+    threads[i].join();
+  }
+
+  for (int i = 0; i < num_rids; i++) {
+    delete txns[i];
+  }
+}
+
+// Basic shared lock test under READ_UNCOMMITTED
+void BasicTest3() {
+  LockManager lock_mgr{};
+  TransactionManager txn_mgr{&lock_mgr};
+
+  std::vector<RID> rids;
+  std::vector<Transaction *> txns;
+  int num_rids = 100;
+  for (int i = 0; i < num_rids; i++) {
+    RID rid{i, static_cast<uint32_t>(i)};
+    rids.push_back(rid);
+    txns.push_back(txn_mgr.Begin(nullptr, IsolationLevel::READ_UNCOMMITTED));
+    EXPECT_EQ(i, txns[i]->GetTransactionId());
+  }
+  // test
+
+  auto task = [&](int txn_id) {
+    for (const RID &rid : rids) {
+      try {
+        lock_mgr.LockShared(txns[txn_id], rid);
+      } catch (TransactionAbortException &e) {
+        CheckAborted(txns[txn_id]);
+      }
+    }
+  };
+
+  std::vector<std::thread> threads;
+  threads.reserve(num_rids);
+
+  for (int i = 0; i < num_rids; i++) {
+    threads.emplace_back(std::thread{task, i});
+  }
+
+  for (int i = 0; i < num_rids; i++) {
+    threads[i].join();
+  }
+
+  for (int i = 0; i < num_rids; i++) {
+    delete txns[i];
+  }
+}
+
+// Correct case
+
+/****************************
+ * Basic Tests (15 pts)
+ ****************************/
+
+const size_t NUM_ITERS = 100;
+
+/*
+ * Score: 5
+ * Description: Basic tests for LockShared and Unlock operations
+ * on small amount of rids.
+ */
+TEST(LockManagerTest, BasicTest1) {
+  //  TEST_TIMEOUT_BEGIN
+  for (size_t i = 0; i < NUM_ITERS; i++) {
+    BasicTest4();
+    BasicTest2();
+    BasicTest3();
+  }
+  //  TEST_TIMEOUT_FAIL_END(1000 * 50)
+}
+
+void UpgradeTest1() {
+  LockManager lock_mgr{};
+  TransactionManager txn_mgr{&lock_mgr};
+  RID rid{0, 0};
+  Transaction txn0(0);
+  Transaction txn1(1);
+  Transaction txn2(2);
+  txn_mgr.Begin(&txn0);
+  txn_mgr.Begin(&txn1);
+  txn_mgr.Begin(&txn2);
+
+  bool res = lock_mgr.LockShared(&txn1, rid);
+  EXPECT_TRUE(res);
+  CheckTxnLockSize(&txn0, 1, 0);
+  CheckGrowing(&txn0);
+
+  res = lock_mgr.LockShared(&txn2, rid);
+  EXPECT_TRUE(res);
+  CheckTxnLockSize(&txn1, 1, 0);
+  CheckGrowing(&txn1);
+
+  res = lock_mgr.LockExclusive(&txn0, rid);
+  EXPECT_FALSE(res);
+  CheckTxnLockSize(&txn2, 0, 0);
+  CheckGrowing(&txn2);
+
+  res = lock_mgr.LockUpgrade(&txn0, rid);
+  EXPECT_TRUE(res);
+  CheckTxnLockSize(&txn0, 0, 1);
+  CheckGrowing(&txn0);
+
+  res = lock_mgr.Unlock(&txn0, rid);
+  EXPECT_TRUE(res);
+  CheckTxnLockSize(&txn0, 0, 0);
+  CheckShrinking(&txn0);
+
+  txn_mgr.Commit(&txn0);
+  CheckCommitted(&txn0);
+}
+TEST(LockManagerTest, UpgradeTest1) {UpgradeTest1();}
+
 }  // namespace bustub
+
+

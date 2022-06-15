@@ -38,25 +38,30 @@ class LockManager {
   class LockRequest {
    public:
     LockRequest(txn_id_t txn_id, LockMode lock_mode) : txn_id_(txn_id), lock_mode_(lock_mode), granted_(false) {}
-    LockRequest(txn_id_t txn_id, LockMode lock_mode,bool granted) : txn_id_(txn_id), lock_mode_(lock_mode), granted_(granted) {}
+    LockRequest(txn_id_t txn_id, LockMode lock_mode, bool granted)
+        : txn_id_(txn_id), lock_mode_(lock_mode), granted_(granted) {}
 
     txn_id_t txn_id_;
     LockMode lock_mode_;
     // 一开始实现时granted没用到（一个txn应该是串行的)
-    // 但是当要进行死锁预防时，需要看到哪些txn在等待分配锁，又重新加上了
+    // 但是当要进行死锁预防时，需要看到哪些txn在等待分配锁，又重新加上了。后来发现实际也没啥用
     bool granted_;
+
+    // 在wound-wait死锁预防中，可能abort掉已经拿到锁的txn，这时他不会被唤醒，因此需要标记从而在申请锁时不管它
+    // bool is_aborted_;
   };
 
   class LockRequestQueue {
    public:
-    //采用加锁的在前，未加锁的在后，进行优化
+    // 按照到来的顺序从前往后加
     std::list<LockRequest> request_queue_;
     // for notifying blocked transactions on this rid
     std::condition_variable cv_;
     // txn_id of an upgrading transaction (if any)
     txn_id_t upgrading_ = INVALID_TXN_ID;
+    // 本来是想这样细粒度上锁的,但不知道哪里出了问题,先大锁用着
     // 对每个tuple的queue上锁
-    std::mutex query_latch_;
+    //    std::mutex query_latch_;
     // 加锁互斥量
     std::mutex mutex_;
   };
@@ -117,6 +122,93 @@ class LockManager {
 
   /** Lock table for lock requests. */
   std::unordered_map<RID, LockRequestQueue> lock_table_;
+
+  // 预先检查是否能上锁
+  bool PreCheckLock(Transaction *txn, const RID &rid) {
+    if (txn->GetState() == TransactionState::ABORTED) {
+      return false;
+    }
+    if (txn->GetState() == TransactionState::SHRINKING) {
+      txn->SetState(TransactionState::ABORTED);
+      throw TransactionAbortException(txn->GetTransactionId(), AbortReason::LOCK_ON_SHRINKING);
+    }
+    return true;
+  }
+
+  // 构造空的等待队列
+  bool ConstructQueue(Transaction *txn, const RID &rid, bool IsReadLock) {
+    if (lock_table_.find(rid) == lock_table_.end()) {
+      // mutex和condition_variable不能被复制或移动,只能采取在map中原地构造的方式将其加入，即使用emplace()，并且需要配合pair’s
+      // piecewise constructor。https://www.cnblogs.com/guxuanqing/p/11396511.html
+      lock_table_.emplace(std::piecewise_construct, std::forward_as_tuple(rid), std::forward_as_tuple());
+    }
+    // 释放大锁前先上小锁，防止在死锁预防过程中又有新的Request加入
+    //  lock_table_[rid].query_latch_.lock();
+
+    // 查询是否已经有锁了
+    for (auto request : lock_table_[rid].request_queue_) {
+      if (request.txn_id_ == txn->GetTransactionId()) {
+        return false;
+      }
+    }
+    if (IsReadLock) {
+      lock_table_[rid].request_queue_.emplace_back(LockRequest(txn->GetTransactionId(), LockMode::SHARED, false));
+    } else {
+      lock_table_[rid].request_queue_.emplace_back(LockRequest(txn->GetTransactionId(), LockMode::EXCLUSIVE, false));
+    }
+    //  latch_.unlock();
+    return true;
+  }
+
+  // Abort所有新的Txn，wound-wait算法
+  void AbortNewTxn(Transaction *txn, const RID &rid, bool IsReadLock);
+
+  // 检查是否被Abort导致唤醒
+  bool CheckAbortedL(Transaction *txn, const RID &rid) {
+    // 被abort唤醒返回false
+    return txn->GetState() == TransactionState::ABORTED;
+    //    if (txn->GetState() == TransactionState::ABORTED) {
+    //      return true;
+    // 因为此时没有加入txn的LockSet，导致后续不会自动放锁，这里需要放
+    //      lock_table_[rid].query_latch_.lock();
+    //      for (auto my_request = lock_table_[rid].request_queue_.begin();
+    //           my_request != lock_table_[rid].request_queue_.end(); ++my_request) {
+    //        if (my_request->txn_id_ == txn->GetTransactionId()) {
+    //          lock_table_[rid].request_queue_.erase(my_request);
+    //          break;
+    //        }
+    //      }
+    //      // throw TransactionAbortException(txn->GetTransactionId(), AbortReason::DEADLOCK);
+    //      return true;
+    //    }
+    //    return false;
+  }
+
+  // 检查是否能上读锁
+  bool CheckSLockL(Transaction *txn, const RID &rid, std::list<LockRequest>::iterator *my_request) {
+    // 获取加入队列时的位置
+    for (std::list<LockRequest>::iterator item = lock_table_[rid].request_queue_.begin();
+         item != lock_table_[rid].request_queue_.end(); ++item) {
+      if (item->txn_id_ == txn->GetTransactionId()) {
+        *my_request = item;
+        break;
+      }
+      if (item->lock_mode_ == LockMode::EXCLUSIVE || !item->granted_) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // 检查是否能上写锁
+  bool CheckXLockL(Transaction *txn, const RID &rid, std::list<LockRequest>::iterator *my_request) {
+    // 在最前面才加写锁
+    if (lock_table_[rid].request_queue_.front().txn_id_ == txn->GetTransactionId()) {
+      *my_request = lock_table_[rid].request_queue_.begin();
+      return true;
+    }
+    return false;
+  }
 };
 
 }  // namespace bustub

@@ -111,14 +111,14 @@ TEST_F(ExecutorTest, SimpleSeqScanTest) {
 }
 
 // INSERT INTO empty_table2 VALUES (100, 10), (101, 11), (102, 12)
- TEST_F(ExecutorTest, MyRawInsertTest) {
+TEST_F(ExecutorTest, MyRawInsertTest) {
   // Create Values to insert
-  std::vector<Value> val1{ValueFactory::GetIntegerValue(100),
-  ValueFactory::GetIntegerValue(2),ValueFactory::GetIntegerValue(100), ValueFactory::GetIntegerValue(2)};
-  std::vector<Value> val2{ValueFactory::GetIntegerValue(101),
-  ValueFactory::GetIntegerValue(3),ValueFactory::GetIntegerValue(100), ValueFactory::GetIntegerValue(2)};
-  std::vector<Value> val3{ValueFactory::GetIntegerValue(102),
-  ValueFactory::GetIntegerValue(4),ValueFactory::GetIntegerValue(100), ValueFactory::GetIntegerValue(2)};
+  std::vector<Value> val1{ValueFactory::GetIntegerValue(100), ValueFactory::GetIntegerValue(2),
+                          ValueFactory::GetIntegerValue(100), ValueFactory::GetIntegerValue(2)};
+  std::vector<Value> val2{ValueFactory::GetIntegerValue(101), ValueFactory::GetIntegerValue(3),
+                          ValueFactory::GetIntegerValue(100), ValueFactory::GetIntegerValue(2)};
+  std::vector<Value> val3{ValueFactory::GetIntegerValue(102), ValueFactory::GetIntegerValue(4),
+                          ValueFactory::GetIntegerValue(100), ValueFactory::GetIntegerValue(2)};
   std::vector<std::vector<Value>> raw_vals{val1, val2, val3};
 
   // Create insert plan node
