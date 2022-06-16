@@ -16,6 +16,9 @@
 
 #include "common/logger.h"
 #include "concurrency/transaction.h"
+
+#define random(a, b) ((a) + rand() % ((b) - (a) + 1))
+
 namespace bustub {
 
 /*
@@ -379,45 +382,159 @@ TEST(LockManagerTest, BasicTest1) {
   //  TEST_TIMEOUT_FAIL_END(1000 * 50)
 }
 
-void UpgradeTest1() {
+// 检测高并法下是否出现死锁
+void MyWoundWaitTest() {
+  int seed = time(nullptr);
+  srand(seed);
+
+  //  freopen("/home/xingmo/test_out.out","w",stdout);
+
   LockManager lock_mgr{};
   TransactionManager txn_mgr{&lock_mgr};
-  RID rid{0, 0};
-  Transaction txn0(0);
-  Transaction txn1(1);
-  Transaction txn2(2);
-  txn_mgr.Begin(&txn0);
-  txn_mgr.Begin(&txn1);
-  txn_mgr.Begin(&txn2);
 
-  bool res = lock_mgr.LockShared(&txn1, rid);
-  EXPECT_TRUE(res);
-  CheckTxnLockSize(&txn0, 1, 0);
-  CheckGrowing(&txn0);
+  //  auto detect = [&]() {
+  //    while (true){
+  //      if (lock_mgr.GetMyLatch()){
+  //        lock_mgr.UnLockLatch();
+  //        printf("no-dead\n");
+  //      }else{
+  //        printf("dead\n");
+  //      }
+  //      std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  //    }
+  //  };
+  //  std::thread dct{detect};
+  //  dct.detach();
 
-  res = lock_mgr.LockShared(&txn2, rid);
-  EXPECT_TRUE(res);
-  CheckTxnLockSize(&txn1, 1, 0);
-  CheckGrowing(&txn1);
+  std::vector<RID> rids;
+  std::vector<Transaction *> txns;
+  int num_rids = 10;
+  for (int i = 0; i < num_rids; i++) {
+    RID rid{i, static_cast<uint32_t>(i)};
+    rids.push_back(rid);
+    txns.push_back(txn_mgr.Begin(nullptr, IsolationLevel::REPEATABLE_READ));
+    EXPECT_EQ(i, txns[i]->GetTransactionId());
+  }
+  // test
+  std::mutex mu;
+  std::unique_lock<std::mutex> lck(mu);
+  std::condition_variable cv;
+  int finish_cnt = 0;
+  std::mutex latch;
 
-  res = lock_mgr.LockExclusive(&txn0, rid);
-  EXPECT_FALSE(res);
-  CheckTxnLockSize(&txn2, 0, 0);
-  CheckGrowing(&txn2);
+  auto task = [&](int txn_id) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    //    bool has_abort = false;
+    int cnt_s = 0;
+    int cnt_x = 0;
 
-  res = lock_mgr.LockUpgrade(&txn0, rid);
-  EXPECT_TRUE(res);
-  CheckTxnLockSize(&txn0, 0, 1);
-  CheckGrowing(&txn0);
+    //随机打乱数组
+    std::vector<RID> old_rids;
+    for (const RID &rid : rids) {
+      old_rids.push_back(rid);
+    }
+    std::vector<RID> new_rids;
+    for (int i = num_rids; i > 0; i--) {
+      int index = random(0, i - 1);
+      //根据选中的下标将原数组选中
+      // push_back函数，在vector类中作用为在vector尾部加入一个数据。
+      new_rids.push_back(old_rids[index]);
+      //将原数组中选中的元素剔除
+      old_rids.erase(old_rids.begin() + index);
+    }
 
-  res = lock_mgr.Unlock(&txn0, rid);
-  EXPECT_TRUE(res);
-  CheckTxnLockSize(&txn0, 0, 0);
-  CheckShrinking(&txn0);
+    //    do {
+    //      has_abort = false;
+    cnt_x = cnt_s = 0;
+    try {
+      //        printf("\n[%d]--BEGIN-Lock\n",txn_id);
+      for (const RID &rid : new_rids) {
+        bool flag = false;
+        int type = random(0, 1);
 
-  txn_mgr.Commit(&txn0);
-  CheckCommitted(&txn0);
+        if (type == 0) {
+          flag = lock_mgr.LockShared(txns[txn_id], rid);
+          if (flag) {
+            ++cnt_s;
+            //              printf("[%d]--SLock-rid[%d]-Success\n", txn_id, rid.GetPageId());
+          }
+        } else {
+          //            printf("[%d]--XLock-rid[%d]-Try\n", txn_id, rid.GetPageId());
+          flag = lock_mgr.LockExclusive(txns[txn_id], rid);
+          if (flag) {
+            ++cnt_x;
+            //              printf("[%d]--XLock-rid[%d]-Success\n", txn_id, rid.GetPageId());
+          }
+        }
+      }
+
+      printf("\n[%d]--BEGIN-UnLock\n", txn_id);
+      for (const RID &rid : new_rids) {
+        //          printf("[%d]--UnLock-rid[%d]\n",txn_id,rid.GetPageId());
+        lock_mgr.Unlock(txns[txn_id], rid);
+      }
+
+      if (txns[txn_id]->GetState() == TransactionState::ABORTED) {
+        printf("\n[%d]--Abort\n", txn_id);
+        txn_mgr.Abort(txns[txn_id]);
+        //          has_abort = true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(random(50, 200)));
+      } else {
+        printf("\n[%d]--End-UnLock\n", txn_id);
+        txn_mgr.Commit(txns[txn_id]);
+        CheckCommitted(txns[txn_id]);
+      }
+
+    } catch (TransactionAbortException &e) {
+      std::cout << e.GetInfo() << std::endl;
+      CheckAborted(txns[txn_id]);
+      printf("\n[%d]--Abort\n", txn_id);
+      txn_mgr.Abort(txns[txn_id]);
+      //        has_abort = true;
+      std::this_thread::sleep_for(std::chrono::milliseconds(random(50, 200)));
+    }
+
+    //    } while (has_abort);
+    //      printf("be-lock\n");
+    latch.lock();
+    //      printf("end-lock\n");
+    ++finish_cnt;
+    //    printf("\nfinishcnt-%d\n\n",finish_cnt);
+    cv.notify_all();
+    latch.unlock();
+  };
+
+  std::vector<std::thread> threads;
+  threads.reserve(num_rids);
+
+  for (int i = 0; i < num_rids; i++) {
+    std::thread tt{task, i};
+    tt.detach();
+  }
+
+  //  printf("be-lock\n");
+  latch.lock();
+  //  printf("end-lock\n");
+  while (finish_cnt < num_rids) {
+    printf("\nfinishcnt-%d\n\n", finish_cnt);
+    latch.unlock();
+    cv.wait(lck);
+    //    printf("be-lock\n");
+    latch.lock();
+    //    printf("end-lock\n");
+  }
+
+  printf("\nfinishcnt-end-%d\n\n", finish_cnt);
+  latch.unlock();
+  //
+  //  for (int i = 0; i < num_rids; i++) {
+  //    threads[i].join();
+  //  }
+
+  for (int i = 0; i < num_rids; i++) {
+    delete txns[i];
+  }
 }
-TEST(LockManagerTest, UpgradeTest1) { UpgradeTest1(); }
+TEST(LockManagerTest, MyWoundWaitTest) { MyWoundWaitTest(); }
 
 }  // namespace bustub

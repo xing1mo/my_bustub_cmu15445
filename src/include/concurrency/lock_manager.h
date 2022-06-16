@@ -59,11 +59,12 @@ class LockManager {
     std::condition_variable cv_;
     // txn_id of an upgrading transaction (if any)
     txn_id_t upgrading_ = INVALID_TXN_ID;
-    // 本来是想这样细粒度上锁的,但不知道哪里出了问题,先大锁用着
+    // 本来是想这样细粒度上锁的,但不知道哪里出了问题,先大锁用着（后面又超时了，改成小锁）
     // 对每个tuple的queue上锁
-    //    std::mutex query_latch_;
+    std::mutex query_latch_;
     // 加锁互斥量
-    std::mutex mutex_;
+    //    std::mutex mutex_;
+    //    std::unique_lock<std::mutex> lck_;
   };
 
  public:
@@ -130,6 +131,9 @@ class LockManager {
     return 0;
   }
 
+  bool GetMyLatch() { return latch_.try_lock(); }
+  void UnLockLatch() { latch_.unlock(); }
+
  private:
   std::mutex latch_;
 
@@ -169,7 +173,6 @@ class LockManager {
     } else {
       lock_table_[rid].request_queue_.emplace_back(LockRequest(txn->GetTransactionId(), LockMode::EXCLUSIVE, false));
     }
-    //  latch_.unlock();
     return true;
   }
 
@@ -199,6 +202,11 @@ class LockManager {
 
   // 检查是否能上读锁
   bool CheckSLockL(Transaction *txn, const RID &rid, std::list<LockRequest>::iterator *my_request) {
+    //    printf("[%d]--CanSLock-rid[%d]-Try:Wait--  ", txn->GetTransactionId(), rid.GetPageId());
+    //    for (auto requst :lock_table_[rid].request_queue_) {
+    //      printf("%d ",requst.txn_id_);
+    //    }
+
     // 获取加入队列时的位置
     for (std::list<LockRequest>::iterator item = lock_table_[rid].request_queue_.begin();
          item != lock_table_[rid].request_queue_.end(); ++item) {
@@ -207,19 +215,32 @@ class LockManager {
         break;
       }
       if (item->lock_mode_ == LockMode::EXCLUSIVE) {
+        //        printf("--No\n");
         return false;
       }
+      //      不用这个判断速度可能快些
+      //      if (!item->granted_) {
+      //        return false;
+      //      }
     }
+
+    //    printf("--Yes\n");
     return true;
   }
 
   // 检查是否能上写锁
   bool CheckXLockL(Transaction *txn, const RID &rid, std::list<LockRequest>::iterator *my_request) {
+    //    printf("[%d]--CanXLock-rid[%d]-Try:Wait--  ", txn->GetTransactionId(), rid.GetPageId());
+    //    for (auto requst :lock_table_[rid].request_queue_) {
+    //      printf("%d ",requst.txn_id_);
+    //    }
     // 在最前面才加写锁
     if (lock_table_[rid].request_queue_.front().txn_id_ == txn->GetTransactionId()) {
       *my_request = lock_table_[rid].request_queue_.begin();
+      //      printf("--Yes\n");
       return true;
     }
+    //    printf("--No\n");
     return false;
   }
 };

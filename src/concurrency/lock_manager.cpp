@@ -34,11 +34,11 @@ void LockManager::AbortNewTxn(Transaction *txn, const RID &rid, bool IsReadLock)
     TransactionManager::GetTransaction(lock_request->txn_id_)->GetSharedLockSet()->erase(rid);
     TransactionManager::GetTransaction(lock_request->txn_id_)->GetExclusiveLockSet()->erase(rid);
     lock_table_[rid].request_queue_.erase(lock_request);
+    //    printf("[%d]--UnLock-rid[%d]-Abort\n", lock_request->txn_id_, rid.GetPageId());
   }
   if (has_abort) {
     lock_table_[rid].cv_.notify_all();
   }
-  //  lock_table_[rid].query_latch_.unlock();
 }
 
 bool LockManager::LockShared(Transaction *txn, const RID &rid) {
@@ -52,37 +52,55 @@ bool LockManager::LockShared(Transaction *txn, const RID &rid) {
   }
 
   // 整个加锁，避免同时构造导致覆盖掉刚新建的lock_table_
-  latch_.lock();
+  std::unique_lock lk(latch_);
+  //  printf("[%d]GTE_LATCH-rid[%d]-SLOCK1\n", txn->GetTransactionId(), rid.GetPageId());
+
   // 构造空的等待队列
   if (!ConstructQueue(txn, rid, true)) {
-    latch_.unlock();
+    //    printf("[%d]UN_LATCH-rid[%d]-SLOCK1\n", txn->GetTransactionId(), rid.GetPageId());
+    lk.unlock();
     return true;
   }
+  //  printf("[%d]--SLock-rid[%d]-Try:Wait--  ", txn->GetTransactionId(), rid.GetPageId());
+  //  for (auto requst :lock_table_[rid].request_queue_) {
+  //    printf("%d ",requst.txn_id_);
+  //  }
+  //  printf("\n");
+  // !!!!!!!!注意：即使此时没上锁也要先加入set，可能后续因为其他RID导致事务被abort，这时set中要有该rid才能成功将等待队列中的锁去除
+  // 事务中加入RID
+  txn->GetSharedLockSet()->emplace(rid);
+
   // Abort所有新的Txn
   AbortNewTxn(txn, rid, true);
 
   std::list<LockRequest>::iterator my_request;
+
+  // !!!注意不同的wait要声明不同的mutex
+  std::mutex mu;
+  std::unique_lock<std::mutex> lck(mu);
   while (!CheckSLockL(txn, rid, &my_request)) {
     // LOG_INFO("txn:[%d] ,rid:[%d]-WaitRLock", txn->GetTransactionId(), rid.GetPageId());
     // 不能上锁,则进行等待
-    std::unique_lock<std::mutex> lck(lock_table_[rid].mutex_);
-    latch_.unlock();
+    //    printf("[%d]UN_LATCH-rid[%d]-SLOCK2\n", txn->GetTransactionId(), rid.GetPageId());
+    lk.unlock();
+
     lock_table_[rid].cv_.wait(lck);
 
-    latch_.lock();
+    lk.lock();
+    //    printf("[%d]GTE_LATCH-rid[%d]-SLOCK2\n", txn->GetTransactionId(), rid.GetPageId());
     // 检查是否被Abort导致唤醒
     if (CheckAbortedL(txn, rid)) {
-      latch_.unlock();
+      //      printf("[%d]UN_LATCH-rid[%d]-SLOCK3\n", txn->GetTransactionId(), rid.GetPageId());
+      lk.unlock();
       return false;
     }
   }
   // 能够上锁
   my_request->granted_ = true;
-  // 事务中加入RID
-  txn->GetSharedLockSet()->emplace(rid);
 
-  latch_.unlock();
-  // LOG_INFO("txn:[%d] ,rid:[%d-%d]-GetRLock", txn->GetTransactionId(), rid.GetPageId(),rid.GetSlotNum());
+  //  printf("[%d]UN_LATCH-rid[%d]-SLOCK4\n", txn->GetTransactionId(), rid.GetPageId());
+  lk.unlock();
+  //  printf("[%d]--GetSLock-rid[%d]-Success\n", txn->GetTransactionId(), rid.GetPageId());
   return true;
 }
 
@@ -93,27 +111,45 @@ bool LockManager::LockExclusive(Transaction *txn, const RID &rid) {
   }
 
   // 整个加锁，避免同时构造导致覆盖掉刚新建的lock_table_
-  latch_.lock();
+  std::unique_lock lk(latch_);
+  //  printf("[%d]GTE_LATCH-rid[%d]-XLOCK1\n", txn->GetTransactionId(), rid.GetPageId());
+  //  printf("[%d]-rid[%d]1\n", txn->GetTransactionId(), rid.GetPageId());
   // 构造空的等待队列
   if (!ConstructQueue(txn, rid, false)) {
-    latch_.unlock();
+    //    printf("[%d]UN_LATCH-rid[%d]-XLOCK1\n", txn->GetTransactionId(), rid.GetPageId());
+    lk.unlock();
     return true;
   }
+  //  printf("[%d]--XLock-rid[%d]-Try:Wait--  ", txn->GetTransactionId(), rid.GetPageId());
+  //  for (auto requst :lock_table_[rid].request_queue_) {
+  //    printf("%d ",requst.txn_id_);
+  //  }
+  //  printf("\n");
+
+  // !!!!!!!!注意：即使此时没上锁也要先加入set，可能后续因为其他RID导致事务被abort，这时set中要有该rid才能成功将等待队列中的锁去除
+  // 事务中加入RID
+  txn->GetExclusiveLockSet()->emplace(rid);
+
   // Abort所有新的Txn
   AbortNewTxn(txn, rid, false);
 
   std::list<LockRequest>::iterator my_request;
+  std::mutex mu;
+  std::unique_lock<std::mutex> lck(mu);
   while (!CheckXLockL(txn, rid, &my_request)) {
     // LOG_INFO("txn:[%d] ,rid:[%d]-WaitWLock", txn->GetTransactionId(), rid.GetPageId());
     // 不能上锁,则进行等待
-    std::unique_lock<std::mutex> lck(lock_table_[rid].mutex_);
-    latch_.unlock();
+    //    printf("[%d]UN_LATCH-rid[%d]-XLOCK2\n", txn->GetTransactionId(), rid.GetPageId());
+    lk.unlock();
+
     lock_table_[rid].cv_.wait(lck);
 
-    latch_.lock();
+    lk.lock();
+    //    printf("[%d]GTE_LATCH-rid[%d]-XLOCK2\n", txn->GetTransactionId(), rid.GetPageId());
     // 检查是否被Abort导致唤醒
     if (CheckAbortedL(txn, rid)) {
-      latch_.unlock();
+      //      printf("[%d]UN_LATCH-rid[%d]-XLOCK3\n", txn->GetTransactionId(), rid.GetPageId());
+      lk.unlock();
       //  return false;
       throw TransactionAbortException(txn->GetTransactionId(), AbortReason::DEADLOCK);
     }
@@ -122,11 +158,9 @@ bool LockManager::LockExclusive(Transaction *txn, const RID &rid) {
   // 能够上锁
   my_request->granted_ = true;
 
-  // 事务中加入RID
-  txn->GetExclusiveLockSet()->emplace(rid);
-
-  latch_.unlock();
-  // LOG_INFO("txn:[%d] ,rid:[%d]-GetWLock", txn->GetTransactionId(), rid.GetPageId());
+  //  printf("[%d]UN_LATCH-rid[%d]-XLOCK4\n", txn->GetTransactionId(), rid.GetPageId());
+  lk.unlock();
+  //  printf("[%d]--GetXLock-rid[%d]-Success\n", txn->GetTransactionId(), rid.GetPageId());
   return true;
 }
 
@@ -136,9 +170,9 @@ bool LockManager::LockUpgrade(Transaction *txn, const RID &rid) {
     return false;
   }
 
-  latch_.lock();
+  std::unique_lock lk(latch_);
   if (lock_table_.find(rid) == lock_table_.end()) {
-    latch_.unlock();
+    lk.unlock();
     return false;
   }
 
@@ -148,7 +182,7 @@ bool LockManager::LockUpgrade(Transaction *txn, const RID &rid) {
     for (LockRequest lock_request : lock_table_[rid].request_queue_) {
       if (lock_request.txn_id_ == lock_table_[rid].upgrading_ &&
           TransactionManager::GetTransaction(lock_request.txn_id_)->GetState() != TransactionState::ABORTED) {
-        latch_.unlock();
+        lk.unlock();
         txn->SetState(TransactionState::ABORTED);
         throw TransactionAbortException(txn->GetTransactionId(), AbortReason::UPGRADE_CONFLICT);
       }
@@ -169,7 +203,7 @@ bool LockManager::LockUpgrade(Transaction *txn, const RID &rid) {
     }
   }
   if (!flag_has_r_lock) {
-    latch_.unlock();
+    lk.unlock();
     return false;
   }
 
@@ -199,22 +233,29 @@ bool LockManager::LockUpgrade(Transaction *txn, const RID &rid) {
     }
   }
 
+  // !!!!!!!!注意：即使此时没上锁也要先加入set，可能后续因为其他RID导致事务被abort，这时set中要有该rid才能成功将等待队列中的锁去除
+  // 事务中加入RID
+  txn->GetSharedLockSet()->erase(rid);
+  txn->GetExclusiveLockSet()->emplace(rid);
+
   std::list<LockRequest>::iterator my_request;
+  std::mutex mu;
+  std::unique_lock<std::mutex> lck(mu);
   while (!CheckXLockL(txn, rid, &my_request)) {
     // LOG_INFO("txn:[%d] ,rid:[%d]-WaitWLock", txn->GetTransactionId(), rid.GetPageId());
     // 不能上锁,则进行等待
-    std::unique_lock<std::mutex> lck(lock_table_[rid].mutex_);
-    latch_.unlock();
+    lk.unlock();
+
     lock_table_[rid].cv_.wait(lck);
 
-    latch_.lock();
+    lk.lock();
     // 检查是否被Abort导致唤醒
     if (CheckAbortedL(txn, rid)) {
       if (lock_table_[rid].upgrading_ == txn->GetTransactionId()) {
         lock_table_[rid].upgrading_ = INVALID_TXN_ID;
       }
       txn->GetSharedLockSet()->erase(rid);
-      latch_.unlock();
+      lk.unlock();
       //  return false;
       throw TransactionAbortException(txn->GetTransactionId(), AbortReason::DEADLOCK);
     }
@@ -227,11 +268,8 @@ bool LockManager::LockUpgrade(Transaction *txn, const RID &rid) {
   assert(lock_table_[rid].upgrading_ == txn->GetTransactionId());
   // 重新设置为invalid
   lock_table_[rid].upgrading_ = INVALID_TXN_ID;
-  // 事务中加入RID
-  txn->GetSharedLockSet()->erase(rid);
-  txn->GetExclusiveLockSet()->emplace(rid);
-  // lock_table_[rid].query_latch_.unlock();
-  latch_.unlock();
+
+  lk.unlock();
   // LOG_INFO("txn:[%d] ,rid:[%d]-UpgradeWLock", txn->GetTransactionId(), rid.GetPageId());
   return true;
 }
@@ -239,7 +277,14 @@ bool LockManager::LockUpgrade(Transaction *txn, const RID &rid) {
 bool LockManager::Unlock(Transaction *txn, const RID &rid) {
   // READ_UNCOMMITTED也会释放写锁
   // 注意：即使是abort状态，也要能够释放锁，因为abort会触发事务回滚，从而调用该函数释放锁
-  latch_.lock();
+  std::unique_lock lk(latch_);
+  //  printf("[%d]GTE_LATCH-rid[%d]-UnLock1\n", txn->GetTransactionId(), rid.GetPageId());
+  //
+  //  printf("[%d]--Unlock-rid[%d]-Try:Wait--  ", txn->GetTransactionId(), rid.GetPageId());
+  //  for (auto requst :lock_table_[rid].request_queue_) {
+  //    printf("%d ",requst.txn_id_);
+  //  }
+  //  printf("\n");
   // 寻找队列中该txn的锁
   bool flag_has_r_lock = false;
   for (std::list<LockRequest>::iterator item = lock_table_[rid].request_queue_.begin();
@@ -260,11 +305,12 @@ bool LockManager::Unlock(Transaction *txn, const RID &rid) {
 
       lock_table_[rid].request_queue_.erase(item);
       lock_table_[rid].cv_.notify_all();
-      // LOG_INFO("txn:[%d] ,rid:[%d]-UnLock", txn->GetTransactionId(), rid.GetPageId());
+      //      printf("[%d]--UnLock-rid[%d]-Success\n", txn->GetTransactionId(), rid.GetPageId());
       break;
     }
   }
-  latch_.unlock();
+  //  printf("[%d]UN_LATCH-rid[%d]-UnLock1\n", txn->GetTransactionId(), rid.GetPageId());
+  lk.unlock();
   return flag_has_r_lock;
 }
 
