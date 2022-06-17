@@ -118,19 +118,6 @@ class LockManager {
    */
   bool Unlock(Transaction *txn, const RID &rid);
 
-  // 检查之前是否上过锁，0没上，1读锁，2写锁
-  int KindLock(Transaction *txn, const RID &rid) {
-    for (auto item : lock_table_[rid].request_queue_) {
-      if (txn->GetTransactionId() == item.txn_id_) {
-        if (item.lock_mode_ == LockMode::SHARED) {
-          return 1;
-        }
-        return 2;
-      }
-    }
-    return 0;
-  }
-
   bool GetMyLatch() { return latch_.try_lock(); }
   void UnLockLatch() { latch_.unlock(); }
 
@@ -153,31 +140,16 @@ class LockManager {
   }
 
   // 构造空的等待队列
-  bool ConstructQueue(Transaction *txn, const RID &rid, bool IsReadLock) {
+  void ConstructQueue(Transaction *txn, const RID &rid) {
     if (lock_table_.find(rid) == lock_table_.end()) {
       // mutex和condition_variable不能被复制或移动,只能采取在map中原地构造的方式将其加入，即使用emplace()，并且需要配合pair’s
       // piecewise constructor。https://www.cnblogs.com/guxuanqing/p/11396511.html
       lock_table_.emplace(std::piecewise_construct, std::forward_as_tuple(rid), std::forward_as_tuple());
     }
-    // 释放大锁前先上小锁，防止在死锁预防过程中又有新的Request加入
-    //  lock_table_[rid].query_latch_.lock();
-
-    // 查询是否已经有锁了
-    for (auto request : lock_table_[rid].request_queue_) {
-      if (request.txn_id_ == txn->GetTransactionId()) {
-        return false;
-      }
-    }
-    if (IsReadLock) {
-      lock_table_[rid].request_queue_.emplace_back(LockRequest(txn->GetTransactionId(), LockMode::SHARED, false));
-    } else {
-      lock_table_[rid].request_queue_.emplace_back(LockRequest(txn->GetTransactionId(), LockMode::EXCLUSIVE, false));
-    }
-    return true;
   }
 
   // Abort所有新的Txn，wound-wait算法
-  void AbortNewTxn(Transaction *txn, const RID &rid, bool IsReadLock);
+  void AbortNewTxn(Transaction *txn, const RID &rid, bool IsReadLock, LockRequestQueue *request_queue);
 
   // 检查是否被Abort导致唤醒
   bool CheckAbortedL(Transaction *txn, const RID &rid) {
@@ -201,46 +173,34 @@ class LockManager {
   }
 
   // 检查是否能上读锁
-  bool CheckSLockL(Transaction *txn, const RID &rid, std::list<LockRequest>::iterator *my_request) {
-    //    printf("[%d]--CanSLock-rid[%d]-Try:Wait--  ", txn->GetTransactionId(), rid.GetPageId());
-    //    for (auto requst :lock_table_[rid].request_queue_) {
-    //      printf("%d ",requst.txn_id_);
-    //    }
-
+  bool CheckSLockL(Transaction *txn, const RID &rid, std::list<LockRequest>::iterator *my_request,
+                   LockRequestQueue *request_queue) {
     // 获取加入队列时的位置
-    for (std::list<LockRequest>::iterator item = lock_table_[rid].request_queue_.begin();
-         item != lock_table_[rid].request_queue_.end(); ++item) {
+    for (std::list<LockRequest>::iterator item = request_queue->request_queue_.begin();
+         item != request_queue->request_queue_.end(); ++item) {
       if (item->txn_id_ == txn->GetTransactionId()) {
         *my_request = item;
         break;
       }
       if (item->lock_mode_ == LockMode::EXCLUSIVE) {
-        //        printf("--No\n");
         return false;
       }
-      //      不用这个判断速度可能快些
-      //      if (!item->granted_) {
-      //        return false;
-      //      }
+      // 不用这个判断速度可能快些
+      // if (!item->granted_) {
+      //    return false;
+      // }
     }
-
-    //    printf("--Yes\n");
     return true;
   }
 
   // 检查是否能上写锁
-  bool CheckXLockL(Transaction *txn, const RID &rid, std::list<LockRequest>::iterator *my_request) {
-    //    printf("[%d]--CanXLock-rid[%d]-Try:Wait--  ", txn->GetTransactionId(), rid.GetPageId());
-    //    for (auto requst :lock_table_[rid].request_queue_) {
-    //      printf("%d ",requst.txn_id_);
-    //    }
+  bool CheckXLockL(Transaction *txn, const RID &rid, std::list<LockRequest>::iterator *my_request,
+                   LockRequestQueue *request_queue) {
     // 在最前面才加写锁
-    if (lock_table_[rid].request_queue_.front().txn_id_ == txn->GetTransactionId()) {
-      *my_request = lock_table_[rid].request_queue_.begin();
-      //      printf("--Yes\n");
+    if (request_queue->request_queue_.front().txn_id_ == txn->GetTransactionId()) {
+      *my_request = request_queue->request_queue_.begin();
       return true;
     }
-    //    printf("--No\n");
     return false;
   }
 };

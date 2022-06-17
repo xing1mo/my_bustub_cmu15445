@@ -75,5 +75,18 @@ class UpdateExecutor : public AbstractExecutor {
 
   // all index
   std::vector<IndexInfo *> index_info_vector_;
+
+  void LockInTuple(const RID &rid) {
+    Transaction *txn = GetExecutorContext()->GetTransaction();
+    // 之前为读锁，升级为写锁
+    if (txn->GetSharedLockSet()->find(rid) != txn->GetSharedLockSet()->end()) {
+      GetExecutorContext()->GetLockManager()->LockUpgrade(txn, rid);
+      return;
+    }
+    // 之前没加锁，此时加写锁
+    if (txn->GetExclusiveLockSet()->find(rid) == txn->GetExclusiveLockSet()->end()) {
+      GetExecutorContext()->GetLockManager()->LockExclusive(txn, rid);
+    }
+  }
 };
 }  // namespace bustub

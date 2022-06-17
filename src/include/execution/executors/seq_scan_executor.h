@@ -54,5 +54,29 @@ class SeqScanExecutor : public AbstractExecutor {
 
   TableInfo *table_info_;
   TableIterator iter_ = TableIterator(nullptr, bustub::RID(), nullptr);
+
+  bool LockInTuple(const RID &rid) {
+    Transaction *txn = GetExecutorContext()->GetTransaction();
+    if (txn->GetIsolationLevel() == IsolationLevel::READ_UNCOMMITTED) {
+      return false;
+    }
+    if (txn->GetExclusiveLockSet()->find(rid) != txn->GetExclusiveLockSet()->end() ||
+        txn->GetSharedLockSet()->find(rid) != txn->GetSharedLockSet()->end()) {
+      return false;
+    }
+    // 非READ_UNCOMMITTED隔离级别时需要加锁
+    GetExecutorContext()->GetLockManager()->LockShared(txn, rid);
+    return true;
+  }
+
+  // READ_COMMITTED隔离级别时需要立即解锁
+  void UnlockInTuple(const RID &rid) {
+    Transaction *txn = GetExecutorContext()->GetTransaction();
+    // If in READ_COMMITTED isolation level and txn never lock this Record before this read
+    if (txn->GetIsolationLevel() == IsolationLevel::READ_COMMITTED &&
+        txn->GetExclusiveLockSet()->find(rid) == txn->GetExclusiveLockSet()->end()) {
+      GetExecutorContext()->GetLockManager()->Unlock(txn, rid);
+    }
+  }
 };
 }  // namespace bustub
